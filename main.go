@@ -1,8 +1,11 @@
 package main
 
 import (
-	"fmt"
 	"os"
+
+	"github.com/ant-testing/mqttgroup/publish"
+
+	"gopkg.in/alog.v1"
 
 	"github.com/ant-testing/mqttgroup/clear"
 
@@ -12,6 +15,7 @@ import (
 )
 
 func main() {
+	alog.RegisterAlog("conf/log.yaml")
 	app := cli.NewApp()
 	app.Name = "mqttgroup"
 	app.Author = "Lyric"
@@ -63,8 +67,76 @@ func main() {
 		Name:    "publish",
 		Aliases: []string{"pub"},
 		Usage:   "发布消息",
+		Flags: []cli.Flag{
+			cli.IntFlag{
+				Name:  "ExecNum, en",
+				Value: 100,
+				Usage: "执行次数",
+			},
+			cli.IntFlag{
+				Name:  "Interval, i",
+				Value: 2,
+				Usage: "发布间隔(以秒为单位)",
+			},
+			cli.BoolFlag{
+				Name:  "IsStore, s",
+				Usage: "是否执行持久化存储",
+			},
+			cli.StringFlag{
+				Name:  "Network, net",
+				Value: "tcp",
+				Usage: "MQTT Network",
+			},
+			cli.StringFlag{
+				Name:  "Address, addr",
+				Value: "127.0.0.1:1883",
+				Usage: "MQTT Address",
+			},
+			cli.StringFlag{
+				Name:  "UserName, name",
+				Value: "",
+				Usage: "MQTT UserName",
+			},
+			cli.StringFlag{
+				Name:  "Password, pwd",
+				Value: "",
+				Usage: "MQTT Password",
+			},
+			cli.IntFlag{
+				Name:  "QOS, qos",
+				Value: 1,
+				Usage: "MQTT QOS",
+			},
+			cli.IntFlag{
+				Name:  "KeepAlive, alive",
+				Value: 60,
+				Usage: "MQTT KeepAlive",
+			},
+			cli.BoolFlag{
+				Name:  "CleanSession, cs",
+				Usage: "MQTT CleanSession",
+			},
+			cli.StringFlag{
+				Name:  "mongo, mgo",
+				Value: "mongodb://127.0.0.1:27017",
+				Usage: "MongoDB连接url",
+			},
+		},
 		Action: func(ctx *cli.Context) {
-			fmt.Println("===> Publish")
+			cfg := &publish.Config{
+				ExecNum:      ctx.Int("ExecNum"),
+				Interval:     ctx.Int("Interval"),
+				IsStore:      ctx.Bool("IsStore"),
+				Network:      ctx.String("Network"),
+				Address:      ctx.String("Address"),
+				Qos:          byte(ctx.Int("QOS")),
+				UserName:     ctx.String("UserName"),
+				Password:     ctx.String("Password"),
+				CleanSession: ctx.Bool("CleanSession"),
+				KeepAlive:    ctx.Int("KeepAlive"),
+				MongoUrl:     ctx.String("mongo"),
+			}
+			publish.Pub(cfg)
 		},
 	})
 	app.Commands = append(app.Commands, cli.Command{

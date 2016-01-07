@@ -1,0 +1,41 @@
+{
+	console: {
+		level: 1,
+		item: {
+			tmpl: "{{.Tag}} [{{.Time}} {{.Level}}] {{.Message}}",
+			time: "{{.Hour}}:{{.Minute}}:{{.Second}}"
+		}
+	},
+	global: {
+	  	rule: 2,showfile: 1,interval: 1
+	},
+	tags: [{
+  		names: ["GENERATE"],
+  		config: {print: 1,level: 3,target: "generate_file"}
+	},{
+  		names: ["PUBLISH"],
+  		config: {print: 1,level: 3,target: "publish_file"}
+	}],
+	store: {
+		file: {
+			generate_file: {
+		      filepath: "logs/generate",
+		      filename: "{{.Year}}{{.Month}}{{.Day}}.log",
+		      filesize: 20480,
+		      item: {
+        		tmpl: '{{.ID}} {{.Time}} {{.Level}} {{.Tag}} "{{.ShortName}} {{.FileFuncName}} {{.FileLine}}" {{.Message}}',
+		        time: "{{.Year}}-{{.Month}}-{{.Day}} {{.Hour}}:{{.Minute}}:{{.Second}}.{{.MilliSecond}}"
+		      }
+			},
+			publish_file: {
+		      filepath: "logs/publish",
+		      filename: "{{.Year}}{{.Month}}{{.Day}}.log",
+		      filesize: 20480,
+		      item: {
+        		tmpl: '{{.ID}} {{.Time}} {{.Level}} {{.Tag}} "{{.ShortName}} {{.FileFuncName}} {{.FileLine}}" {{.Message}}',
+		        time: "{{.Year}}-{{.Month}}-{{.Day}} {{.Hour}}:{{.Minute}}:{{.Second}}.{{.MilliSecond}}"
+		      }
+			}
+		}
+	}
+}
