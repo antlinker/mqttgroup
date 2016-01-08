@@ -161,12 +161,15 @@ func (p *Publish) output(ticker *time.Ticker) {
 
 func (p *Publish) checkComplete() {
 	<-p.execComplete
-	for {
-		if p.receiveNum == p.receiveTotalNum {
-			p.complete <- true
-			break
+	go func() {
+		ticker := time.NewTicker(time.Second * 1)
+		for range ticker.C {
+			if p.receiveNum == p.receiveTotalNum {
+				p.complete <- true
+				ticker.Stop()
+			}
 		}
-	}
+	}()
 }
 
 func (p *Publish) ExecPublish() {
@@ -176,8 +179,8 @@ func (p *Publish) ExecPublish() {
 			p.execComplete <- true
 			return
 		}
+		atomic.AddInt64(&p.execNum, 1)
 		p.publish()
-		p.execNum++
 		p.ExecPublish()
 	})
 }
@@ -190,7 +193,7 @@ func (p *Publish) publish() {
 			p.publishTotalNum++
 			p.receiveTotalNum += int64(p.groupData[groups[j]])
 		}
-		go p.userPublish(user)
+		p.userPublish(user)
 	}
 }
 

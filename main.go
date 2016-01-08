@@ -109,7 +109,7 @@ func main() {
 			},
 			cli.IntFlag{
 				Name:  "KeepAlive, alive",
-				Value: 60,
+				Value: 30,
 				Usage: "MQTT KeepAlive",
 			},
 			cli.BoolFlag{
