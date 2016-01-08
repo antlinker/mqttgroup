@@ -78,6 +78,16 @@ func main() {
 				Value: 2,
 				Usage: "发布间隔(以秒为单位)",
 			},
+			cli.IntFlag{
+				Name:  "UserInterval, ui",
+				Value: 10,
+				Usage: "组成员发包间隔（单位毫秒）",
+			},
+			cli.IntFlag{
+				Name:  "UserGroupInterval, ugi",
+				Value: 0,
+				Usage: "组成员针对组的发包间隔（单位毫秒）",
+			},
 			cli.BoolFlag{
 				Name:  "IsStore, s",
 				Usage: "是否执行持久化存储",
@@ -109,7 +119,7 @@ func main() {
 			},
 			cli.IntFlag{
 				Name:  "KeepAlive, alive",
-				Value: 30,
+				Value: 60,
 				Usage: "MQTT KeepAlive",
 			},
 			cli.BoolFlag{
@@ -124,17 +134,19 @@ func main() {
 		},
 		Action: func(ctx *cli.Context) {
 			cfg := &publish.Config{
-				ExecNum:      ctx.Int("ExecNum"),
-				Interval:     ctx.Int("Interval"),
-				IsStore:      ctx.Bool("IsStore"),
-				Network:      ctx.String("Network"),
-				Address:      ctx.String("Address"),
-				Qos:          byte(ctx.Int("QOS")),
-				UserName:     ctx.String("UserName"),
-				Password:     ctx.String("Password"),
-				CleanSession: ctx.Bool("CleanSession"),
-				KeepAlive:    ctx.Int("KeepAlive"),
-				MongoUrl:     ctx.String("mongo"),
+				ExecNum:           ctx.Int("ExecNum"),
+				Interval:          ctx.Int("Interval"),
+				UserInterval:      ctx.Int("UserInterval"),
+				UserGroupInterval: ctx.Int("UserGroupInterval"),
+				IsStore:           ctx.Bool("IsStore"),
+				Network:           ctx.String("Network"),
+				Address:           ctx.String("Address"),
+				Qos:               byte(ctx.Int("QOS")),
+				UserName:          ctx.String("UserName"),
+				Password:          ctx.String("Password"),
+				CleanSession:      ctx.Bool("CleanSession"),
+				KeepAlive:         ctx.Int("KeepAlive"),
+				MongoUrl:          ctx.String("mongo"),
 			}
 			publish.Pub(cfg)
 		},

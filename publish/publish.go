@@ -3,6 +3,7 @@ package publish
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync/atomic"
 	"time"
 
@@ -20,8 +21,8 @@ func Pub(cfg *Config) {
 		groupData:    make(map[string]int),
 		clients:      make(map[string]*client.Client),
 		execComplete: make(chan bool, 1),
-		complete:     make(chan bool, 1),
 		end:          make(chan bool, 1),
+		startTime:    time.Now(),
 	}
 	pub.lg.SetLogTag("PUBLISH")
 	session, err := mgo.Dial(cfg.MongoUrl)
@@ -39,6 +40,7 @@ func Pub(cfg *Config) {
 	pub.ExecPublish()
 	<-pub.end
 	pub.lg.InfoC("执行完成.")
+	os.Exit(0)
 }
 
 type Publish struct {
@@ -54,10 +56,16 @@ type Publish struct {
 	execComplete    chan bool
 	publishTotalNum int64
 	publishNum      int64
+	prePublishNum   int64
+	maxPublishNum   int64
+	arrPublishNum   []int64
 	receiveTotalNum int64
 	receiveNum      int64
-	complete        chan bool
+	preReceiveNum   int64
+	maxReceiveNum   int64
+	arrReceiveNum   []int64
 	end             chan bool
+	startTime       time.Time
 }
 
 func (p *Publish) Init() error {
@@ -70,9 +78,11 @@ func (p *Publish) Init() error {
 		return err
 	}
 	p.lg.InfoC("初始化操作完成.")
-	ticker := time.NewTicker(time.Duration(p.cfg.Interval) * time.Second)
-	go p.output(ticker)
+	calcTicker := time.NewTicker(time.Second * 1)
+	go p.calcMaxAndMinPacketNum(calcTicker)
 	go p.checkComplete()
+	prTicker := time.NewTicker(time.Duration(p.cfg.Interval) * time.Second)
+	go p.pubAndRecOutput(prTicker)
 	return nil
 }
 
@@ -147,29 +157,69 @@ func (p *Publish) initConnection() error {
 	return nil
 }
 
-func (p *Publish) output(ticker *time.Ticker) {
-	for range ticker.C {
-		p.lg.InfoCf("执行次数:%d,发包量:%d,实际发包量:%d,应接收数量:%d,实际接收数量:%d", p.execNum, p.publishTotalNum, p.publishNum, p.receiveTotalNum, p.receiveNum)
-		select {
-		case <-p.complete:
-			p.end <- true
-			ticker.Stop()
-		default:
-		}
-	}
-}
-
 func (p *Publish) checkComplete() {
 	<-p.execComplete
 	go func() {
-		ticker := time.NewTicker(time.Second * 1)
+		ticker := time.NewTicker(time.Millisecond * 500)
 		for range ticker.C {
 			if p.receiveNum == p.receiveTotalNum {
-				p.complete <- true
 				ticker.Stop()
+				p.end <- true
 			}
 		}
 	}()
+}
+
+func (p *Publish) calcMaxAndMinPacketNum(ticker *time.Ticker) {
+	for range ticker.C {
+		pubNum := p.publishNum
+		recNum := p.receiveNum
+		pNum := pubNum - p.prePublishNum
+		rNum := recNum - p.preReceiveNum
+		if pNum > p.maxPublishNum {
+			p.maxPublishNum = pNum
+		}
+		p.arrPublishNum = append(p.arrPublishNum, pNum)
+		if rNum > p.maxReceiveNum {
+			p.maxReceiveNum = rNum
+		}
+		p.arrReceiveNum = append(p.arrReceiveNum, rNum)
+		p.prePublishNum = pubNum
+		p.preReceiveNum = recNum
+	}
+}
+
+func (p *Publish) pubAndRecOutput(ticker *time.Ticker) {
+	for ct := range ticker.C {
+		currentSecond := float64(ct.Sub(p.startTime)) / float64(time.Second)
+		var psNum int64
+		arrPNum := p.arrPublishNum
+		for i := 0; i < len(arrPNum); i++ {
+			psNum += arrPNum[i]
+		}
+		avgPNum := psNum / int64(len(arrPNum))
+		var rsNum int64
+		arrRNum := p.arrReceiveNum
+		for i := 0; i < len(arrRNum); i++ {
+			rsNum += arrRNum[i]
+		}
+		avgRNum := rsNum / int64(len(arrRNum))
+		output := `
+执行耗时                    %.2fs
+执行次数                    %d
+应发包量                    %d
+实际发包量                  %d
+每秒平均的发包量            %d
+每秒最大的发包量            %d
+应收包量                    %d
+实际收包量                  %d
+每秒平均的接包量            %d
+每秒最大的接包量            %d`
+
+		fmt.Printf(output,
+			currentSecond, p.execNum, p.publishTotalNum, p.publishNum, avgPNum, p.maxPublishNum, p.receiveTotalNum, p.receiveNum, avgRNum, p.maxReceiveNum)
+		fmt.Printf("\n")
+	}
 }
 
 func (p *Publish) ExecPublish() {
@@ -194,6 +244,9 @@ func (p *Publish) publish() {
 			p.receiveTotalNum += int64(p.groupData[groups[j]])
 		}
 		p.userPublish(user)
+		if v := p.cfg.UserInterval; v > 0 {
+			time.Sleep(time.Duration(v) * time.Millisecond)
+		}
 	}
 }
 
@@ -233,5 +286,8 @@ func (p *Publish) userPublish(user config.User) {
 			return
 		}
 		atomic.AddInt64(&p.publishNum, 1)
+		if v := p.cfg.UserGroupInterval; v > 0 {
+			time.Sleep(time.Duration(v) * time.Millisecond)
+		}
 	}
 }
