@@ -9,7 +9,7 @@ import (
 
 	"github.com/antlinker/go-cmap"
 
-	"github.com/ant-testing/mqttgroup/config"
+	"github.com/antlinker/mqttgroup/config"
 	"github.com/yosssi/gmq/mqtt/client"
 	"gopkg.in/alog.v1"
 	"gopkg.in/mgo.v2"

@@ -1,7 +1,7 @@
 package clear
 
 import (
-	"github.com/ant-testing/mqttgroup/config"
+	"github.com/antlinker/mqttgroup/config"
 	"gopkg.in/alog.v1"
 	"gopkg.in/mgo.v2"
 )

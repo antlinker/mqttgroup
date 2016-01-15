@@ -3,13 +3,13 @@ package main
 import (
 	"os"
 
-	"github.com/ant-testing/mqttgroup/publish"
+	"github.com/antlinker/mqttgroup/publish"
 
 	"gopkg.in/alog.v1"
 
-	"github.com/ant-testing/mqttgroup/clear"
+	"github.com/antlinker/mqttgroup/clear"
 
-	"github.com/ant-testing/mqttgroup/generate"
+	"github.com/antlinker/mqttgroup/generate"
 
 	"github.com/codegangsta/cli"
 )

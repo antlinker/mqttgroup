@@ -7,7 +7,7 @@ import (
 
 	"gopkg.in/mgo.v2/bson"
 
-	"github.com/ant-testing/mqttgroup/config"
+	"github.com/antlinker/mqttgroup/config"
 )
 
 func NewHandleConnect(clientID string, pub *Publish) *HandleConnect {

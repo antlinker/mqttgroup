@@ -7,7 +7,7 @@ import (
 
 	"gopkg.in/alog.v1"
 
-	"github.com/ant-testing/mqttgroup/config"
+	"github.com/antlinker/mqttgroup/config"
 
 	"gopkg.in/mgo.v2"
 )
