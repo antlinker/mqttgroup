@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/antlinker/go-cmap"
+
 	"github.com/ant-testing/mqttgroup/config"
 	"github.com/yosssi/gmq/mqtt/client"
 	"gopkg.in/alog.v1"
@@ -20,6 +22,7 @@ func Pub(cfg *Config) {
 		lg:           alog.NewALog(),
 		groupData:    make(map[string]int),
 		clients:      make(map[string]*client.Client),
+		disClients:   cmap.NewConcurrencyMap(),
 		execComplete: make(chan bool, 1),
 		end:          make(chan bool, 1),
 		startTime:    time.Now(),
@@ -51,6 +54,7 @@ type Publish struct {
 	userData        []config.User
 	groupData       map[string]int
 	clients         map[string]*client.Client
+	disClients      cmap.ConcurrencyMap
 	publishID       int64
 	execNum         int64
 	execComplete    chan bool
@@ -113,10 +117,9 @@ func (p *Publish) initConnection() error {
 	for i, l := 0, len(p.userData); i < l; i++ {
 		user := p.userData[i]
 		clientID := user.UserID
+		clientConn := NewHandleConnect(clientID, p)
 		cli := client.New(&client.Options{
-			ErrorHandler: func(err error) {
-				p.lg.Errorf("The client %s error occurs:%s", clientID, err.Error())
-			},
+			ErrorHandler: clientConn.ErrorHandle,
 		})
 		connOptions := &client.ConnectOptions{
 			Network:   p.cfg.Network,
@@ -136,14 +139,13 @@ func (p *Publish) initConnection() error {
 			return fmt.Errorf("Client %s connect error:%s", clientID, err.Error())
 		}
 		for j := 0; j < len(user.Groups); j++ {
-			handle := NewHandleSubscribe(clientID, p)
 			topic := "G/" + user.Groups[j]
 			err = cli.Subscribe(&client.SubscribeOptions{
 				SubReqs: []*client.SubReq{
 					&client.SubReq{
 						TopicFilter: []byte(topic),
 						QoS:         p.cfg.Qos,
-						Handler:     handle.Handler,
+						Handler:     clientConn.Subscribe,
 					},
 				},
 			})
@@ -204,9 +206,11 @@ func (p *Publish) pubAndRecOutput(ticker *time.Ticker) {
 			rsNum += arrRNum[i]
 		}
 		avgRNum := rsNum / int64(len(arrRNum))
+		clientNum := len(p.clients) - p.disClients.Len()
 		output := `
 执行耗时                    %.2fs
 执行次数                    %d
+客户端数量                  %d
 应发包量                    %d
 实际发包量                  %d
 每秒平均的发包量            %d
@@ -217,7 +221,7 @@ func (p *Publish) pubAndRecOutput(ticker *time.Ticker) {
 每秒最大的接包量            %d`
 
 		fmt.Printf(output,
-			currentSecond, p.execNum, p.publishTotalNum, p.publishNum, avgPNum, p.maxPublishNum, p.receiveTotalNum, p.receiveNum, avgRNum, p.maxReceiveNum)
+			currentSecond, p.execNum, clientNum, p.publishTotalNum, p.publishNum, avgPNum, p.maxPublishNum, p.receiveTotalNum, p.receiveNum, avgRNum, p.maxReceiveNum)
 		fmt.Printf("\n")
 	}
 }
@@ -226,6 +230,7 @@ func (p *Publish) ExecPublish() {
 	time.AfterFunc(time.Duration(p.cfg.Interval)*time.Second, func() {
 		if p.execNum == int64(p.cfg.ExecNum) {
 			p.lg.InfoC("发布已执行完成，等待接收订阅...")
+			p.disconnect()
 			p.execComplete <- true
 			return
 		}
@@ -233,6 +238,25 @@ func (p *Publish) ExecPublish() {
 		p.publish()
 		p.ExecPublish()
 	})
+}
+
+func (p *Publish) disconnect() {
+	if v := p.cfg.DisconnectScale; v > 100 || v <= 0 {
+		return
+	}
+	clientCount := len(p.clients)
+	disCount := int(float32(clientCount) * (float32(p.cfg.DisconnectScale) / 100))
+	for k, v := range p.clients {
+		exist, _ := p.disClients.Contains(k)
+		if exist {
+			continue
+		}
+		v.Disconnect()
+		disCount--
+		if disCount == 0 {
+			break
+		}
+	}
 }
 
 func (p *Publish) publish() {
@@ -251,6 +275,10 @@ func (p *Publish) publish() {
 }
 
 func (p *Publish) userPublish(user config.User) {
+	v, _ := p.disClients.Contains(user.UserID)
+	if v {
+		return
+	}
 	cli := p.clients[user.UserID]
 	for i := 0; i < len(user.Groups); i++ {
 		group := user.Groups[i]
@@ -263,12 +291,10 @@ func (p *Publish) userPublish(user config.User) {
 			Receives: make([]config.ReceivePacket, 0),
 		}
 		if p.cfg.IsStore {
-			go func(packet config.SendPacket) {
-				err := p.database.C(config.CPacket).Insert(packet)
-				if err != nil {
-					p.lg.Errorf("Publish store error:%s", err.Error())
-				}
-			}(sendPacket)
+			err := p.database.C(config.CPacket).Insert(sendPacket)
+			if err != nil {
+				p.lg.Errorf("Publish store error:%s", err.Error())
+			}
 		}
 		bufData, err := json.Marshal(sendPacket)
 		if err != nil {

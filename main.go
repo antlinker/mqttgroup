@@ -33,12 +33,12 @@ func main() {
 			},
 			cli.IntFlag{
 				Name:  "grouplimit, gcln",
-				Value: 2000,
+				Value: 200,
 				Usage: "组成员数量限制",
 			},
 			cli.IntFlag{
 				Name:  "clientnum, cn",
-				Value: 10000,
+				Value: 1000,
 				Usage: "组成员数量",
 			},
 			cli.IntFlag{
@@ -70,23 +70,28 @@ func main() {
 		Flags: []cli.Flag{
 			cli.IntFlag{
 				Name:  "ExecNum, en",
-				Value: 100,
+				Value: 10,
 				Usage: "执行次数",
 			},
 			cli.IntFlag{
 				Name:  "Interval, i",
-				Value: 2,
-				Usage: "发布间隔(以秒为单位)",
+				Value: 5,
+				Usage: "发布间隔(单位:秒)",
 			},
 			cli.IntFlag{
 				Name:  "UserInterval, ui",
-				Value: 10,
-				Usage: "组成员发包间隔（单位毫秒）",
+				Value: 1,
+				Usage: "组成员发包间隔（单位:毫秒）",
 			},
 			cli.IntFlag{
 				Name:  "UserGroupInterval, ugi",
 				Value: 0,
-				Usage: "组成员针对组的发包间隔（单位毫秒）",
+				Usage: "组成员针对组的发包间隔（单位:毫秒）",
+			},
+			cli.IntFlag{
+				Name:  "DisconnectScale, ds",
+				Value: 0,
+				Usage: "发送完成之后，需要断开客户端的比例",
 			},
 			cli.BoolFlag{
 				Name:  "IsStore, s",

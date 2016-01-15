@@ -70,7 +70,7 @@ func (g *Generate) GenGroup() error {
 
 func (g *Generate) GenUser() error {
 	g.lg.InfoC("开始生成用户并为用户分配群组...")
-	var maxNum, minNum, clientNum int
+	var maxNum, minNum, clientNum, ownerGroupNum int
 	for i := 0; i < g.cfg.ClientNum; i++ {
 		var groupData []string
 		for j := 0; j < g.cfg.ClientGroupLimitNum; j++ {
@@ -99,6 +99,7 @@ func (g *Generate) GenUser() error {
 			}
 		}
 		groupLen := len(groupData)
+		ownerGroupNum += groupLen
 		if groupLen == 0 {
 			continue
 		}
@@ -121,7 +122,24 @@ func (g *Generate) GenUser() error {
 		}
 		clientNum++
 	}
-	g.lg.InfoCf("群组分配完成,组成员总数:%d,成员所拥有的群组数最多:%d,最少:%d", clientNum, maxNum, minNum)
+	var maxGroupClientNum, minGroupClientNum, sumGroupClientNum int
+	for _, v := range g.groupClientNum {
+		sumGroupClientNum += v
+		if minGroupClientNum == 0 {
+			minGroupClientNum = v
+		}
+		if v > maxGroupClientNum {
+			maxGroupClientNum = v
+			continue
+		}
+		if v < minGroupClientNum {
+			minGroupClientNum = v
+		}
+	}
+	groupNum := len(g.groupClientNum)
+	fmt.Println("\n群组分配完成:")
+	fmt.Printf("群组总数量:%d,群组最多的组成员数量:%d,最少组成员数量:%d,平均组成员数量:%d\n", groupNum, maxGroupClientNum, minGroupClientNum, sumGroupClientNum/groupNum)
+	fmt.Printf("组成员总数量:%d,组成员拥有最多的群组数量:%d,最少的群组数量:%d,平均群组数量:%d\n\n", clientNum, maxNum, minNum, ownerGroupNum/clientNum)
 	return nil
 }
 
