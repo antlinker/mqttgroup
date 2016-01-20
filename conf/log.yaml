@@ -7,7 +7,7 @@
 		}
 	},
 	global: {
-	  	rule: 2,showfile: 1,interval: 1
+	  	rule: 2
 	},
 	tags: [{
   		names: ["GENERATE"],
@@ -23,7 +23,7 @@
 		      filename: "{{.Year}}{{.Month}}{{.Day}}.log",
 		      filesize: 20480,
 		      item: {
-        		tmpl: '{{.ID}} {{.Time}} {{.Level}} {{.Tag}} "{{.ShortName}} {{.FileFuncName}} {{.FileLine}}" {{.Message}}',
+        		tmpl: '{{.Time}} {{.Level}} {{.Tag}} "{{.ShortName}} {{.FileFuncName}} {{.FileLine}}" {{.Message}}',
 		        time: "{{.Year}}-{{.Month}}-{{.Day}} {{.Hour}}:{{.Minute}}:{{.Second}}.{{.MilliSecond}}"
 		      }
 			},
@@ -32,7 +32,7 @@
 		      filename: "{{.Year}}{{.Month}}{{.Day}}.log",
 		      filesize: 20480,
 		      item: {
-        		tmpl: '{{.ID}} {{.Time}} {{.Level}} {{.Tag}} "{{.ShortName}} {{.FileFuncName}} {{.FileLine}}" {{.Message}}',
+        		tmpl: '{{.Time}} {{.Level}} {{.Tag}} "{{.ShortName}} {{.FileFuncName}} {{.FileLine}}" {{.Message}}',
 		        time: "{{.Year}}-{{.Month}}-{{.Day}} {{.Hour}}:{{.Minute}}:{{.Second}}.{{.MilliSecond}}"
 		      }
 			}

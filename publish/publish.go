@@ -136,24 +136,25 @@ func (p *Publish) initConnection() error {
 		}
 		err := cli.Connect(connOptions)
 		if err != nil {
-			return fmt.Errorf("Client %s connect error:%s", clientID, err.Error())
+			return fmt.Errorf("客户端[%s]建立连接发生异常:%s", clientID, err.Error())
 		}
+		var subReqs []*client.SubReq
 		for j := 0; j < len(user.Groups); j++ {
 			topic := "G/" + user.Groups[j]
-			err = cli.Subscribe(&client.SubscribeOptions{
-				SubReqs: []*client.SubReq{
-					&client.SubReq{
-						TopicFilter: []byte(topic),
-						QoS:         p.cfg.Qos,
-						Handler:     clientConn.Subscribe,
-					},
-				},
+			subReqs = append(subReqs, &client.SubReq{
+				TopicFilter: []byte(topic),
+				QoS:         p.cfg.Qos,
+				Handler:     clientConn.Subscribe,
 			})
-			if err != nil {
-				return fmt.Errorf("The client %s subscribe topic %s error:%s", clientID, topic, err.Error())
-			}
+		}
+		err = cli.Subscribe(&client.SubscribeOptions{
+			SubReqs: subReqs,
+		})
+		if err != nil {
+			return fmt.Errorf("客户端[%s]订阅主题发生异常:%s", clientID, err.Error())
 		}
 		p.clients[clientID] = cli
+		time.Sleep(time.Millisecond * time.Duration(len(user.Groups)))
 	}
 	p.lg.InfoC("组成员建立MQTT数据连接完成.")
 	return nil
@@ -267,7 +268,7 @@ func (p *Publish) publish() {
 			p.publishTotalNum++
 			p.receiveTotalNum += int64(p.groupData[groups[j]])
 		}
-		p.userPublish(user)
+		go p.userPublish(user)
 		if v := p.cfg.UserInterval; v > 0 {
 			time.Sleep(time.Duration(v) * time.Millisecond)
 		}
