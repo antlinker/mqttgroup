@@ -24,7 +24,9 @@ type HandleConnect struct {
 
 func (hc *HandleConnect) ErrorHandle(err error) {
 	hc.pub.lg.Errorf("客户端%s发生异常:%s,已断开连接!", hc.clientID, err.Error())
-	hc.pub.disClients.Set(hc.clientID, 1)
+	if v := hc.pub.cfg.DisconnectScale; v > 0 {
+		hc.pub.disClients.Set(hc.clientID, 1)
+	}
 }
 
 func (hc *HandleConnect) Subscribe(topicName, message []byte) {

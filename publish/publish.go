@@ -7,10 +7,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	MQTT "git.eclipse.org/gitroot/paho/org.eclipse.paho.mqtt.golang.git"
 	"github.com/antlinker/go-cmap"
-
 	"github.com/antlinker/mqttgroup/config"
-	"github.com/yosssi/gmq/mqtt/client"
 	"gopkg.in/alog.v1"
 	"gopkg.in/mgo.v2"
 )
@@ -21,7 +20,7 @@ func Pub(cfg *Config) {
 		cfg:          cfg,
 		lg:           alog.NewALog(),
 		groupData:    make(map[string]int),
-		clients:      make(map[string]*client.Client),
+		clients:      make(map[string]*MQTT.Client),
 		disClients:   cmap.NewConcurrencyMap(),
 		execComplete: make(chan bool, 1),
 		end:          make(chan bool, 1),
@@ -47,29 +46,30 @@ func Pub(cfg *Config) {
 }
 
 type Publish struct {
-	cfg             *Config
-	lg              *alog.ALog
-	session         *mgo.Session
-	database        *mgo.Database
-	userData        []config.User
-	groupData       map[string]int
-	clients         map[string]*client.Client
-	disClients      cmap.ConcurrencyMap
-	publishID       int64
-	execNum         int64
-	execComplete    chan bool
-	publishTotalNum int64
-	publishNum      int64
-	prePublishNum   int64
-	maxPublishNum   int64
-	arrPublishNum   []int64
-	receiveTotalNum int64
-	receiveNum      int64
-	preReceiveNum   int64
-	maxReceiveNum   int64
-	arrReceiveNum   []int64
-	end             chan bool
-	startTime       time.Time
+	cfg               *Config
+	lg                *alog.ALog
+	session           *mgo.Session
+	database          *mgo.Database
+	userData          []config.User
+	groupData         map[string]int
+	clients           map[string]*MQTT.Client
+	disClients        cmap.ConcurrencyMap
+	publishID         int64
+	execNum           int64
+	execComplete      chan bool
+	publishTotalNum   int64
+	publishNum        int64
+	prePublishNum     int64
+	maxPublishNum     int64
+	arrPublishNum     []int64
+	receiveTotalNum   int64
+	receiveNum        int64
+	preReceiveNum     int64
+	maxReceiveNum     int64
+	arrReceiveNum     []int64
+	end               chan bool
+	startTime         time.Time
+	publishPacketTime time.Time
 }
 
 func (p *Publish) Init() error {
@@ -82,6 +82,7 @@ func (p *Publish) Init() error {
 		return err
 	}
 	p.lg.InfoC("初始化操作完成.")
+	p.publishPacketTime = time.Now()
 	calcTicker := time.NewTicker(time.Second * 1)
 	go p.calcMaxAndMinPacketNum(calcTicker)
 	go p.checkComplete()
@@ -117,44 +118,47 @@ func (p *Publish) initConnection() error {
 	for i, l := 0, len(p.userData); i < l; i++ {
 		user := p.userData[i]
 		clientID := user.UserID
-		clientConn := NewHandleConnect(clientID, p)
-		cli := client.New(&client.Options{
-			ErrorHandler: clientConn.ErrorHandle,
-		})
-		connOptions := &client.ConnectOptions{
-			Network:   p.cfg.Network,
-			Address:   p.cfg.Address,
-			ClientID:  []byte(clientID),
-			KeepAlive: uint16(p.cfg.KeepAlive),
+		opts := MQTT.NewClientOptions()
+		opts.AddBroker(fmt.Sprintf("%s://%s", p.cfg.Network, p.cfg.Address))
+		opts.SetClientID(clientID)
+		opts.SetStore(MQTT.NewMemoryStore())
+		opts.SetProtocolVersion(4)
+		autoReconnect := true
+		if v := p.cfg.DisconnectScale; v > 0 {
+			autoReconnect = false
 		}
-		if p.cfg.UserName != "" && p.cfg.Password != "" {
-			connOptions.UserName = []byte(p.cfg.UserName)
-			connOptions.Password = []byte(p.cfg.Password)
+		opts.SetAutoReconnect(autoReconnect)
+		if name, pwd := p.cfg.UserName, p.cfg.Password; name != "" && pwd != "" {
+			opts.SetUsername(name)
+			opts.SetPassword(pwd)
+		}
+		if v := p.cfg.KeepAlive; v > 0 {
+			opts.SetKeepAlive(time.Duration(v))
 		}
 		if v := p.cfg.CleanSession; v {
-			connOptions.CleanSession = v
+			opts.SetCleanSession(v)
 		}
-		err := cli.Connect(connOptions)
-		if err != nil {
-			return fmt.Errorf("客户端[%s]建立连接发生异常:%s", clientID, err.Error())
+		clientHandle := NewHandleConnect(clientID, p)
+		opts.SetConnectionLostHandler(func(cli *MQTT.Client, err error) {
+			clientHandle.ErrorHandle(err)
+		})
+		cli := MQTT.NewClient(opts)
+		connectToken := cli.Connect()
+		if connectToken.Wait() && connectToken.Error() != nil {
+			return fmt.Errorf("客户端[%s]建立连接发生异常:%s", clientID, connectToken.Error().Error())
 		}
-		var subReqs []*client.SubReq
+		subTopics := make(map[string]byte)
 		for j := 0; j < len(user.Groups); j++ {
 			topic := "G/" + user.Groups[j]
-			subReqs = append(subReqs, &client.SubReq{
-				TopicFilter: []byte(topic),
-				QoS:         p.cfg.Qos,
-				Handler:     clientConn.Subscribe,
-			})
+			subTopics[topic] = p.cfg.Qos
 		}
-		err = cli.Subscribe(&client.SubscribeOptions{
-			SubReqs: subReqs,
+		subToken := cli.SubscribeMultiple(subTopics, func(cli *MQTT.Client, msg MQTT.Message) {
+			clientHandle.Subscribe([]byte(msg.Topic()), msg.Payload())
 		})
-		if err != nil {
-			return fmt.Errorf("客户端[%s]订阅主题发生异常:%s", clientID, err.Error())
+		if subToken.Wait() && subToken.Error() != nil {
+			return fmt.Errorf("客户端[%s]订阅主题发生异常:%s", clientID, subToken.Error().Error())
 		}
 		p.clients[clientID] = cli
-		time.Sleep(time.Millisecond * time.Duration(len(user.Groups)))
 	}
 	p.lg.InfoC("组成员建立MQTT数据连接完成.")
 	return nil
@@ -194,7 +198,8 @@ func (p *Publish) calcMaxAndMinPacketNum(ticker *time.Ticker) {
 
 func (p *Publish) pubAndRecOutput(ticker *time.Ticker) {
 	for ct := range ticker.C {
-		currentSecond := float64(ct.Sub(p.startTime)) / float64(time.Second)
+		totalSecond := float64(ct.Sub(p.startTime)) / float64(time.Second)
+		packetSecond := (float64(ct.Sub(p.publishPacketTime)) - float64(time.Duration(p.cfg.Interval)*time.Second)) / float64(time.Second)
 		var psNum int64
 		arrPNum := p.arrPublishNum
 		for i := 0; i < len(arrPNum); i++ {
@@ -209,7 +214,8 @@ func (p *Publish) pubAndRecOutput(ticker *time.Ticker) {
 		avgRNum := rsNum / int64(len(arrRNum))
 		clientNum := len(p.clients) - p.disClients.Len()
 		output := `
-执行耗时                    %.2fs
+总耗时                      %.2fs
+发包耗时                    %.2fs
 执行次数                    %d
 客户端数量                  %d
 应发包量                    %d
@@ -222,7 +228,7 @@ func (p *Publish) pubAndRecOutput(ticker *time.Ticker) {
 每秒最大的接包量            %d`
 
 		fmt.Printf(output,
-			currentSecond, p.execNum, clientNum, p.publishTotalNum, p.publishNum, avgPNum, p.maxPublishNum, p.receiveTotalNum, p.receiveNum, avgRNum, p.maxReceiveNum)
+			totalSecond, packetSecond, p.execNum, clientNum, p.publishTotalNum, p.publishNum, avgPNum, p.maxPublishNum, p.receiveTotalNum, p.receiveNum, avgRNum, p.maxReceiveNum)
 		fmt.Printf("\n")
 	}
 }
@@ -252,7 +258,7 @@ func (p *Publish) disconnect() {
 		if exist {
 			continue
 		}
-		v.Disconnect()
+		v.Disconnect(100)
 		disCount--
 		if disCount == 0 {
 			break
@@ -303,14 +309,10 @@ func (p *Publish) userPublish(user config.User) {
 			continue
 		}
 		topic := "G/" + group
-		err = cli.Publish(&client.PublishOptions{
-			QoS:       p.cfg.Qos,
-			TopicName: []byte(topic),
-			Message:   bufData,
-		})
-		if err != nil {
-			p.lg.Errorf("User %s publish topic %s error:%s", user.UserID, topic, err.Error())
-			return
+		publishToken := cli.Publish(topic, p.cfg.Qos, false, bufData)
+		if publishToken.Wait() && publishToken.Error() != nil {
+			p.lg.Errorf("用户[%s]发布消息出现异常:%s", user.UserID, publishToken.Error().Error())
+			continue
 		}
 		atomic.AddInt64(&p.publishNum, 1)
 		if v := p.cfg.UserGroupInterval; v > 0 {
