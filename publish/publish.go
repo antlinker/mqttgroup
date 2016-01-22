@@ -133,7 +133,7 @@ func (p *Publish) initConnection() error {
 			opts.SetPassword(pwd)
 		}
 		if v := p.cfg.KeepAlive; v > 0 {
-			opts.SetKeepAlive(time.Duration(v))
+			opts.SetKeepAlive(time.Duration(v) * time.Second)
 		}
 		if v := p.cfg.CleanSession; v {
 			opts.SetCleanSession(v)
