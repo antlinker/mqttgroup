@@ -7,11 +7,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	MQTT "git.eclipse.org/gitroot/paho/org.eclipse.paho.mqtt.golang.git"
-	"github.com/antlinker/go-cmap"
-	"github.com/antlinker/mqttgroup/config"
+	MQTT "github.com/antlinker/mqtt-cli"
 	"gopkg.in/alog.v1"
 	"gopkg.in/mgo.v2"
+
+	"github.com/antlinker/go-cmap"
+	"github.com/antlinker/mqttgroup/config"
 )
 
 // Pub 执行Publish操作
