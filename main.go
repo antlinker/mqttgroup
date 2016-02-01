@@ -89,6 +89,11 @@ func main() {
 				Usage: "组成员针对组的发包间隔（单位:毫秒）",
 			},
 			cli.IntFlag{
+				Name:  "AutoReconnect, ar",
+				Value: 1,
+				Usage: "客户端断开连接后执行自动重连(默认为1，0表示不重连)",
+			},
+			cli.IntFlag{
 				Name:  "DisconnectScale, ds",
 				Value: 0,
 				Usage: "发送完成之后，需要断开客户端的比例",
@@ -152,6 +157,9 @@ func main() {
 				CleanSession:      ctx.Bool("CleanSession"),
 				KeepAlive:         ctx.Int("KeepAlive"),
 				MongoUrl:          ctx.String("mongo"),
+			}
+			if ctx.Int("AutoReconnect") == 1 {
+				cfg.AutoReconnect = true
 			}
 			publish.Pub(cfg)
 		},
