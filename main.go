@@ -5,7 +5,7 @@ import (
 
 	"github.com/antlinker/mqttgroup/publish"
 
-	"gopkg.in/alog.v1"
+	"github.com/antlinker/alog"
 
 	"github.com/antlinker/mqttgroup/clear"
 

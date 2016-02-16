@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/antlinker/alog"
 	MQTT "github.com/antlinker/mqtt-cli"
-	"gopkg.in/alog.v1"
 	"gopkg.in/mgo.v2"
 
 	"github.com/antlinker/go-cmap"

@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"time"
 
-	"gopkg.in/alog.v1"
+	"github.com/antlinker/alog"
 
 	"github.com/antlinker/mqttgroup/config"
 
