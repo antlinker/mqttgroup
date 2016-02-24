@@ -19,13 +19,14 @@ import (
 // Pub 执行Publish操作
 func Pub(cfg *Config) {
 	pub := &Publish{
-		cfg:          cfg,
-		lg:           alog.NewALog(),
-		groupData:    make(map[string]int),
-		clients:      cmap.NewConcurrencyMap(),
-		execComplete: make(chan bool, 1),
-		end:          make(chan bool, 1),
-		startTime:    time.Now(),
+		cfg:            cfg,
+		lg:             alog.NewALog(),
+		groupData:      make(map[string]int),
+		clients:        cmap.NewConcurrencyMap(),
+		execComplete:   make(chan bool, 1),
+		end:            make(chan bool, 1),
+		startTime:      time.Now(),
+		receiveHandles: cmap.NewConcurrencyMap(),
 	}
 	pub.lg.SetLogTag("PUBLISH")
 	session, err := mgo.Dial(cfg.MongoUrl)
@@ -42,8 +43,7 @@ func Pub(cfg *Config) {
 	}
 	pub.ExecPublish()
 	<-pub.end
-	pub.lg.InfoC("执行完成.")
-	os.Exit(0)
+	pub.handleEnd()
 }
 
 type Publish struct {
@@ -69,6 +69,7 @@ type Publish struct {
 	arrReceiveNum     []int64
 	end               chan bool
 	startTime         time.Time
+	receiveHandles    cmap.ConcurrencyMap
 	publishPacketTime time.Time
 }
 
@@ -163,6 +164,7 @@ func (p *Publish) initConnection() error {
 				time.Sleep(time.Millisecond * 100)
 				goto LB_RECONNECT
 			}
+			p.receiveHandles.Set(clientID, clientHandle)
 			p.clients.Set(clientID, cli)
 		}(p.userData[i])
 	}
@@ -182,6 +184,17 @@ func (p *Publish) checkComplete() {
 			}
 		}
 	}()
+}
+
+func (pub *Publish) handleEnd() {
+	for ele := range pub.receiveHandles.Elements() {
+		if ele.Value != nil {
+			handle := ele.Value.(*HandleConnect)
+			handle.Close()
+		}
+	}
+	pub.lg.InfoC("执行完成.")
+	os.Exit(0)
 }
 
 func (p *Publish) calcMaxAndMinPacketNum(ticker *time.Ticker) {
