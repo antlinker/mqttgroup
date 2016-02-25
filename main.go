@@ -3,6 +3,8 @@ package main
 import (
 	"os"
 
+	"github.com/antlinker/mqttgroup/collect"
+
 	"github.com/antlinker/mqttgroup/publish"
 
 	"github.com/antlinker/alog"
@@ -129,7 +131,7 @@ func main() {
 			},
 			cli.IntFlag{
 				Name:  "KeepAlive, alive",
-				Value: 60,
+				Value: 30,
 				Usage: "MQTT KeepAlive",
 			},
 			cli.BoolFlag{
@@ -190,6 +192,29 @@ func main() {
 				MongoUrl: ctx.String("mongo"),
 			}
 			clear.Clear(cfg)
+		},
+	})
+	app.Commands = append(app.Commands, cli.Command{
+		Name:  "collect",
+		Usage: "汇总接收的包数据",
+		Flags: []cli.Flag{
+			cli.IntFlag{
+				Name:  "StoreNum, sn",
+				Value: 100,
+				Usage: "批量写入MongoDB的数据条数",
+			},
+			cli.StringFlag{
+				Name:  "Mongo, mgo",
+				Value: "mongodb://127.0.0.1:27017",
+				Usage: "MongoDB连接url",
+			},
+		},
+		Action: func(ctx *cli.Context) {
+			cfg := collect.Config{
+				StoreNum: ctx.Int("StoreNum"),
+				MongoUrl: ctx.String("Mongo"),
+			}
+			collect.ExecCollect(cfg)
 		},
 	})
 	app.Run(os.Args)

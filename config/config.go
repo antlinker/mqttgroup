@@ -5,10 +5,11 @@ import (
 )
 
 const (
-	Database = "group-testing"
+	Database = "mqttgroup"
 	CGroup   = "group"
 	CUser    = "user"
 	CPacket  = "packet"
+	CCollect = "collect"
 )
 
 type Group struct {
@@ -32,4 +33,14 @@ type SendPacket struct {
 type ReceivePacket struct {
 	ReceiveUser string    `bson:"uid"`
 	ReceiveTime time.Time `bson:"time"`
+}
+
+// CollectPacket 包汇总
+type CollectPacket struct {
+	PacketID      string  `bson:"packetid"`
+	PreReceiveNum int64   `bson:"prerecvnum"`
+	ReceiveNum    int64   `bson:"recvnum"`
+	MaxConsume    float64 `bson:"max"`
+	MinConsume    float64 `bson:"min"`
+	AvgConsume    float64 `bson:"avg"`
 }

@@ -15,6 +15,12 @@
 	},{
   		names: ["PUBLISH"],
   		config: {print: 1,level: 3,target: "publish_file"}
+	},{
+  		names: ["PUBLISH_DATA"],
+  		config: {print: 1,target: "publish_data_file"}
+	},{
+  		names: ["COLLECT"],
+  		config: {print: 1,level: 3,target: "collect_file"}
 	}],
 	store: {
 		file: {
@@ -29,6 +35,23 @@
 			},
 			publish_file: {
 		      filepath: "logs/publish",
+		      filename: "{{.Year}}{{.Month}}{{.Day}}.log",
+		      filesize: 20480,
+		      item: {
+        		tmpl: '{{.Time}} {{.Level}} {{.Tag}} "{{.ShortName}} {{.FileFuncName}} {{.FileLine}}" {{.Message}}',
+		        time: "{{.Year}}-{{.Month}}-{{.Day}} {{.Hour}}:{{.Minute}}:{{.Second}}.{{.MilliSecond}}"
+		      }
+			},
+			publish_data_file: {
+		      filepath: "logs/publish",
+		      filename: "data-{{.Year}}{{.Month}}{{.Day}}.log",
+		      filesize: 20480,
+		      item: {
+        		tmpl: '{{.Message}}'
+		      }
+			},
+			collect_file: {
+		      filepath: "logs/collect",
 		      filename: "{{.Year}}{{.Month}}{{.Day}}.log",
 		      filesize: 20480,
 		      item: {

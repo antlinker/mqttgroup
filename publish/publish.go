@@ -21,6 +21,7 @@ func Pub(cfg *Config) {
 	pub := &Publish{
 		cfg:            cfg,
 		lg:             alog.NewALog(),
+		lgData:         alog.NewALog(),
 		groupData:      make(map[string]int),
 		clients:        cmap.NewConcurrencyMap(),
 		execComplete:   make(chan bool, 1),
@@ -29,6 +30,7 @@ func Pub(cfg *Config) {
 		receiveHandles: cmap.NewConcurrencyMap(),
 	}
 	pub.lg.SetLogTag("PUBLISH")
+	pub.lgData.SetLogTag("PUBLISH_DATA")
 	session, err := mgo.Dial(cfg.MongoUrl)
 	if err != nil {
 		pub.lg.Errorf("数据库连接发生异常:%s", err.Error())
@@ -49,6 +51,7 @@ func Pub(cfg *Config) {
 type Publish struct {
 	cfg               *Config
 	lg                *alog.ALog
+	lgData            *alog.ALog
 	session           *mgo.Session
 	database          *mgo.Database
 	userData          []config.User
@@ -247,9 +250,11 @@ func (p *Publish) pubAndRecOutput(ticker *time.Ticker) {
 每秒平均的接包量            %d
 每秒最大的接包量            %d`
 
-		fmt.Printf(output,
+		p.lgData.Infof(output,
 			totalSecond, packetSecond, p.execNum, clientNum, p.publishTotalNum, p.publishNum, avgPNum, p.maxPublishNum, p.receiveTotalNum, p.receiveNum, avgRNum, p.maxReceiveNum)
-		fmt.Printf("\n")
+		// fmt.Printf(output,
+		// 	totalSecond, packetSecond, p.execNum, clientNum, p.publishTotalNum, p.publishNum, avgPNum, p.maxPublishNum, p.receiveTotalNum, p.receiveNum, avgRNum, p.maxReceiveNum)
+		// fmt.Printf("\n")
 	}
 }
 
