@@ -5,11 +5,12 @@ import (
 )
 
 const (
-	Database = "mqttgroup"
-	CGroup   = "group"
-	CUser    = "user"
-	CPacket  = "packet"
-	CCollect = "collect"
+	Database       = "mqttgroup"
+	CGroup         = "group"
+	CUser          = "user"
+	CPacket        = "sendpacket"
+	CReceivePacket = "receivepacket"
+	CCollect       = "collectpacket"
 )
 
 type Group struct {
@@ -23,14 +24,14 @@ type User struct {
 }
 
 type SendPacket struct {
-	SendID   string          `bson:"sid"`
-	SendUser string          `bson:"uid"`
-	ToGroup  string          `bson:"gid"`
-	SendTime time.Time       `bson:"time"`
-	Receives []ReceivePacket `bson:"receives"`
+	SendID   string    `bson:"sid"`
+	SendUser string    `bson:"uid"`
+	ToGroup  string    `bson:"gid"`
+	SendTime time.Time `bson:"time"`
 }
 
 type ReceivePacket struct {
+	SendID      string    `bson:"sid"`
 	ReceiveUser string    `bson:"uid"`
 	ReceiveTime time.Time `bson:"time"`
 }

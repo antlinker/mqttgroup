@@ -5,27 +5,20 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gopkg.in/mgo.v2/bson"
-
 	"github.com/antlinker/mqttgroup/config"
 )
 
 func NewHandleConnect(clientID string, pub *Publish) *HandleConnect {
 	handle := &HandleConnect{
-		clientID:    clientID,
-		pub:         pub,
-		receiveChan: make(chan []byte, 10),
-	}
-	if pub.cfg.IsStore {
-		go handle.HandleReceive()
+		clientID: clientID,
+		pub:      pub,
 	}
 	return handle
 }
 
 type HandleConnect struct {
-	clientID    string
-	receiveChan chan []byte
-	pub         *Publish
+	clientID string
+	pub      *Publish
 }
 
 func (hc *HandleConnect) ErrorHandle(err error) {
@@ -36,29 +29,20 @@ func (hc *HandleConnect) ErrorHandle(err error) {
 }
 
 func (hc *HandleConnect) Subscribe(topicName, message []byte) {
+	receiveTime := time.Now()
 	atomic.AddInt64(&hc.pub.receiveNum, 1)
 	if hc.pub.cfg.IsStore {
-		hc.receiveChan <- message
-	}
-}
-
-func (hc *HandleConnect) HandleReceive() {
-	for msg := range hc.receiveChan {
 		var sendPacket config.SendPacket
-		json.Unmarshal(msg, &sendPacket)
+		json.Unmarshal(message, &sendPacket)
 		receivePacket := config.ReceivePacket{
+			SendID:      sendPacket.SendID,
 			ReceiveUser: hc.clientID,
-			ReceiveTime: time.Now(),
+			ReceiveTime: receiveTime,
 		}
-		err := hc.pub.database.C(config.CPacket).Update(bson.M{"sid": sendPacket.SendID}, bson.M{"$push": bson.M{"receives": receivePacket}})
-		if err != nil {
-			hc.pub.lg.Errorf("Handle subscribe store error:%s", err.Error())
-		}
-	}
-}
-
-func (hc *HandleConnect) Close() {
-	if hc.receiveChan != nil {
-		close(hc.receiveChan)
+		hc.pub.receivePacketStore.Push(receivePacket)
+		// err := hc.pub.database.C(config.CPacket).Update(bson.M{"sid": sendPacket.SendID}, bson.M{"$push": bson.M{"receives": receivePacket}})
+		// if err != nil {
+		// 	hc.pub.lg.Errorf("Handle subscribe store error:%s", err.Error())
+		// }
 	}
 }

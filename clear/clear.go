@@ -67,6 +67,10 @@ func (c *clear) clearPacket() error {
 	if err != nil {
 		return err
 	}
+	_, err = c.database.C(config.CReceivePacket).RemoveAll(nil)
+	if err != nil {
+		return err
+	}
 	c.lg.InfoC("包数据清除完成")
 	return nil
 }

@@ -104,6 +104,26 @@ func main() {
 				Name:  "IsStore, s",
 				Usage: "是否执行持久化存储",
 			},
+			cli.IntFlag{
+				Name:  "SendPacketStoreNum, spsn",
+				Value: 200,
+				Usage: "发包一次性写入数据量",
+			},
+			cli.IntFlag{
+				Name:  "SendPacketBucketNum, spbn",
+				Value: 100,
+				Usage: "发包临时存储使用容器的数量",
+			},
+			cli.IntFlag{
+				Name:  "ReceivePacketStoreNum, rpsn",
+				Value: 1000,
+				Usage: "接包一次性写入数据量",
+			},
+			cli.IntFlag{
+				Name:  "ReceivePacketBucketNum, rpbn",
+				Value: 100,
+				Usage: "接包临时存储使用容器的数量",
+			},
 			cli.StringFlag{
 				Name:  "Network, net",
 				Value: "tcp",
@@ -146,19 +166,23 @@ func main() {
 		},
 		Action: func(ctx *cli.Context) {
 			cfg := &publish.Config{
-				ExecNum:           ctx.Int("ExecNum"),
-				Interval:          ctx.Int("Interval"),
-				UserInterval:      ctx.Int("UserInterval"),
-				UserGroupInterval: ctx.Int("UserGroupInterval"),
-				IsStore:           ctx.Bool("IsStore"),
-				Network:           ctx.String("Network"),
-				Address:           ctx.String("Address"),
-				Qos:               byte(ctx.Int("QOS")),
-				UserName:          ctx.String("UserName"),
-				Password:          ctx.String("Password"),
-				CleanSession:      ctx.Bool("CleanSession"),
-				KeepAlive:         ctx.Int("KeepAlive"),
-				MongoUrl:          ctx.String("mongo"),
+				ExecNum:                ctx.Int("ExecNum"),
+				Interval:               ctx.Int("Interval"),
+				UserInterval:           ctx.Int("UserInterval"),
+				UserGroupInterval:      ctx.Int("UserGroupInterval"),
+				SendPacketStoreNum:     ctx.Int("SendPacketStoreNum"),
+				SendPacketBucketNum:    ctx.Int("SendPacketBucketNum"),
+				ReceivePacketStoreNum:  ctx.Int("ReceivePacketStoreNum"),
+				ReceivePacketBucketNum: ctx.Int("ReceivePacketBucketNum"),
+				IsStore:                ctx.Bool("IsStore"),
+				Network:                ctx.String("Network"),
+				Address:                ctx.String("Address"),
+				Qos:                    byte(ctx.Int("QOS")),
+				UserName:               ctx.String("UserName"),
+				Password:               ctx.String("Password"),
+				CleanSession:           ctx.Bool("CleanSession"),
+				KeepAlive:              ctx.Int("KeepAlive"),
+				MongoUrl:               ctx.String("mongo"),
 			}
 			if ctx.Int("AutoReconnect") == 1 {
 				cfg.AutoReconnect = true
@@ -173,11 +197,11 @@ func main() {
 		Flags: []cli.Flag{
 			cli.BoolFlag{
 				Name:  "generate, gen",
-				Usage: "清除群组基础数据",
+				Usage: "清除群组及用户基础数据",
 			},
 			cli.BoolFlag{
 				Name:  "publish, pub",
-				Usage: "清除publish包数据",
+				Usage: "清除发布及接收的包数据",
 			},
 			cli.StringFlag{
 				Name:  "mongo, mgo",
@@ -198,11 +222,6 @@ func main() {
 		Name:  "collect",
 		Usage: "汇总接收的包数据",
 		Flags: []cli.Flag{
-			cli.IntFlag{
-				Name:  "StoreNum, sn",
-				Value: 100,
-				Usage: "批量写入MongoDB的数据条数",
-			},
 			cli.StringFlag{
 				Name:  "Mongo, mgo",
 				Value: "mongodb://127.0.0.1:27017",
@@ -211,7 +230,6 @@ func main() {
 		},
 		Action: func(ctx *cli.Context) {
 			cfg := collect.Config{
-				StoreNum: ctx.Int("StoreNum"),
 				MongoUrl: ctx.String("Mongo"),
 			}
 			collect.ExecCollect(cfg)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/antlinker/alog"
+	"github.com/antlinker/go-bucket"
 	MQTT "github.com/antlinker/mqtt-cli"
 	"gopkg.in/mgo.v2"
 
@@ -19,15 +20,16 @@ import (
 // Pub 执行Publish操作
 func Pub(cfg *Config) {
 	pub := &Publish{
-		cfg:            cfg,
-		lg:             alog.NewALog(),
-		lgData:         alog.NewALog(),
-		groupData:      make(map[string]int),
-		clients:        cmap.NewConcurrencyMap(),
-		execComplete:   make(chan bool, 1),
-		end:            make(chan bool, 1),
-		startTime:      time.Now(),
-		receiveHandles: cmap.NewConcurrencyMap(),
+		cfg:                cfg,
+		lg:                 alog.NewALog(),
+		lgData:             alog.NewALog(),
+		groupData:          make(map[string]int),
+		clients:            cmap.NewConcurrencyMap(),
+		execComplete:       make(chan bool, 1),
+		end:                make(chan bool, 1),
+		startTime:          time.Now(),
+		sendPacketStore:    bucket.NewBucketGroup(cfg.SendPacketStoreNum, cfg.SendPacketBucketNum),
+		receivePacketStore: bucket.NewBucketGroup(cfg.ReceivePacketStoreNum, cfg.ReceivePacketBucketNum),
 	}
 	pub.lg.SetLogTag("PUBLISH")
 	pub.lgData.SetLogTag("PUBLISH_DATA")
@@ -37,7 +39,6 @@ func Pub(cfg *Config) {
 		return
 	}
 	pub.session = session
-	pub.database = session.DB(config.Database)
 	err = pub.Init()
 	if err != nil {
 		pub.lg.Error(err)
@@ -49,31 +50,35 @@ func Pub(cfg *Config) {
 }
 
 type Publish struct {
-	cfg               *Config
-	lg                *alog.ALog
-	lgData            *alog.ALog
-	session           *mgo.Session
-	database          *mgo.Database
-	userData          []config.User
-	groupData         map[string]int
-	clients           cmap.ConcurrencyMap
-	publishID         int64
-	execNum           int64
-	execComplete      chan bool
-	publishTotalNum   int64
-	publishNum        int64
-	prePublishNum     int64
-	maxPublishNum     int64
-	arrPublishNum     []int64
-	receiveTotalNum   int64
-	receiveNum        int64
-	preReceiveNum     int64
-	maxReceiveNum     int64
-	arrReceiveNum     []int64
-	end               chan bool
-	startTime         time.Time
-	receiveHandles    cmap.ConcurrencyMap
-	publishPacketTime time.Time
+	cfg                *Config
+	lg                 *alog.ALog
+	lgData             *alog.ALog
+	session            *mgo.Session
+	userData           []config.User
+	groupData          map[string]int
+	clients            cmap.ConcurrencyMap
+	publishID          int64
+	execNum            int64
+	execComplete       chan bool
+	publishTotalNum    int64
+	publishNum         int64
+	prePublishNum      int64
+	maxPublishNum      int64
+	arrPublishNum      []int64
+	receiveTotalNum    int64
+	receiveNum         int64
+	preReceiveNum      int64
+	maxReceiveNum      int64
+	arrReceiveNum      []int64
+	end                chan bool
+	startTime          time.Time
+	publishPacketTime  time.Time
+	sendPacketStore    bucket.BucketGroup
+	receivePacketStore bucket.BucketGroup
+}
+
+func (p *Publish) DB() *mgo.Database {
+	return p.session.Clone().DB(config.Database)
 }
 
 func (p *Publish) Init() error {
@@ -85,19 +90,21 @@ func (p *Publish) Init() error {
 	if err != nil {
 		return err
 	}
-	p.lg.InfoC("初始化操作完成.")
-	p.publishPacketTime = time.Now()
+	p.sendStore()
+	p.receiveStore()
 	calcTicker := time.NewTicker(time.Second * 1)
 	go p.calcMaxAndMinPacketNum(calcTicker)
-	go p.checkComplete()
 	prTicker := time.NewTicker(time.Duration(p.cfg.Interval) * time.Second)
 	go p.pubAndRecOutput(prTicker)
+	go p.checkComplete()
+	p.lg.InfoC("初始化操作完成.")
+	p.publishPacketTime = time.Now()
 	return nil
 }
 
 func (p *Publish) initData() error {
 	p.lg.InfoC("开始组成员数据初始化...")
-	err := p.database.C(config.CUser).Find(nil).All(&p.userData)
+	err := p.DB().C(config.CUser).Find(nil).All(&p.userData)
 	if err != nil {
 		return fmt.Errorf("Init group user data error:%s", err.Error())
 	}
@@ -150,7 +157,6 @@ func (p *Publish) initConnection() error {
 			cli := MQTT.NewClient(opts)
 			connectToken := cli.Connect()
 			if connectToken.Wait() && connectToken.Error() != nil {
-				// p.lg.Errorf("客户端[%s]建立连接发生异常:%s", clientID, connectToken.Error().Error())
 				time.Sleep(time.Millisecond * 100)
 				goto LB_RECONNECT
 			}
@@ -163,11 +169,9 @@ func (p *Publish) initConnection() error {
 				clientHandle.Subscribe([]byte(msg.Topic()), msg.Payload())
 			})
 			if subToken.Wait() && subToken.Error() != nil {
-				// p.lg.Errorf("客户端[%s]订阅主题发生异常:%s", clientID, subToken.Error().Error())
 				time.Sleep(time.Millisecond * 100)
 				goto LB_RECONNECT
 			}
-			p.receiveHandles.Set(clientID, clientHandle)
 			p.clients.Set(clientID, cli)
 		}(p.userData[i])
 	}
@@ -176,28 +180,52 @@ func (p *Publish) initConnection() error {
 	return nil
 }
 
-func (p *Publish) checkComplete() {
-	<-p.execComplete
+func (p *Publish) sendStore() {
+	bGroup, err := p.sendPacketStore.Open()
+	if err != nil {
+		p.lg.Errorf("Send store error:%v", err)
+		return
+	}
 	go func() {
-		ticker := time.NewTicker(time.Millisecond * 500)
-		for range ticker.C {
-			if p.receiveNum == p.receiveTotalNum {
-				ticker.Stop()
-				p.end <- true
+		db := p.DB()
+		for cBucket := range bGroup {
+			if cBucket.Len() == 0 {
+				continue
+			}
+		LB_SENDPACKETSTORE:
+			sVals, _ := cBucket.ToSlice()
+			err := db.C(config.CPacket).Insert(sVals...)
+			if err != nil {
+				p.lg.Errorf("Send packet store error!")
+				time.Sleep(time.Millisecond * 1)
+				goto LB_SENDPACKETSTORE
 			}
 		}
 	}()
 }
 
-func (pub *Publish) handleEnd() {
-	for ele := range pub.receiveHandles.Elements() {
-		if ele.Value != nil {
-			handle := ele.Value.(*HandleConnect)
-			handle.Close()
-		}
+func (p *Publish) receiveStore() {
+	bGroup, err := p.receivePacketStore.Open()
+	if err != nil {
+		p.lg.Errorf("Receive store error:%v", err)
+		return
 	}
-	pub.lg.InfoC("执行完成.")
-	os.Exit(0)
+	go func() {
+		db := p.DB()
+		for cBucket := range bGroup {
+			if cBucket.Len() == 0 {
+				continue
+			}
+		LB_RECEIVEPACKETSTORE:
+			sVals, _ := cBucket.ToSlice()
+			err := db.C(config.CReceivePacket).Insert(sVals...)
+			if err != nil {
+				p.lg.Errorf("Receive packet store error:%v", err)
+				time.Sleep(time.Millisecond * 1)
+				goto LB_RECEIVEPACKETSTORE
+			}
+		}
+	}()
 }
 
 func (p *Publish) calcMaxAndMinPacketNum(ticker *time.Ticker) {
@@ -252,10 +280,29 @@ func (p *Publish) pubAndRecOutput(ticker *time.Ticker) {
 
 		p.lgData.Infof(output,
 			totalSecond, packetSecond, p.execNum, clientNum, p.publishTotalNum, p.publishNum, avgPNum, p.maxPublishNum, p.receiveTotalNum, p.receiveNum, avgRNum, p.maxReceiveNum)
-		// fmt.Printf(output,
-		// 	totalSecond, packetSecond, p.execNum, clientNum, p.publishTotalNum, p.publishNum, avgPNum, p.maxPublishNum, p.receiveTotalNum, p.receiveNum, avgRNum, p.maxReceiveNum)
-		// fmt.Printf("\n")
 	}
+}
+
+func (p *Publish) checkComplete() {
+	<-p.execComplete
+	go func() {
+		ticker := time.NewTicker(time.Millisecond * 500)
+		for range ticker.C {
+			if p.publishNum == p.publishTotalNum {
+				p.sendPacketStore.Close()
+				ticker.Stop()
+			}
+		}
+	}()
+	go func() {
+		ticker := time.NewTicker(time.Millisecond * 500)
+		for range ticker.C {
+			if p.receiveNum == p.receiveTotalNum {
+				ticker.Stop()
+				p.end <- true
+			}
+		}
+	}()
 }
 
 func (p *Publish) ExecPublish() {
@@ -317,13 +364,13 @@ func (p *Publish) userPublish(user config.User) {
 			SendUser: user.UserID,
 			ToGroup:  group,
 			SendTime: cTime,
-			Receives: make([]config.ReceivePacket, 0),
 		}
 		if p.cfg.IsStore {
-			err := p.database.C(config.CPacket).Insert(sendPacket)
-			if err != nil {
-				p.lg.Errorf("Publish store error:%s", err.Error())
-			}
+			p.sendPacketStore.Push(sendPacket)
+			// err := p.database.C(config.CPacket).Insert(sendPacket)
+			// if err != nil {
+			// 	p.lg.Errorf("Publish store error:%s", err.Error())
+			// }
 		}
 		bufData, err := json.Marshal(sendPacket)
 		if err != nil {
@@ -337,4 +384,11 @@ func (p *Publish) userPublish(user config.User) {
 			time.Sleep(time.Duration(v) * time.Millisecond)
 		}
 	}
+}
+
+func (p *Publish) handleEnd() {
+	p.receivePacketStore.Close()
+	p.lg.InfoC("执行完成.")
+	time.Sleep(time.Second * 2)
+	os.Exit(0)
 }

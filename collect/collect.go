@@ -3,6 +3,10 @@ package collect
 import (
 	"fmt"
 
+	"gopkg.in/mgo.v2/bson"
+
+	"github.com/antlinker/go-bucket"
+
 	"github.com/antlinker/alog"
 	"github.com/antlinker/mqttgroup/config"
 
@@ -12,10 +16,11 @@ import (
 // ExecCollect 执行汇总
 func ExecCollect(cfg Config) {
 	clt := &Collect{
-		cfg:             cfg,
-		lg:              alog.NewALog(),
-		chCollectPacket: make(chan config.CollectPacket, 1),
-		groupData:       make(map[string]int),
+		cfg:                cfg,
+		lg:                 alog.NewALog(),
+		chCollectPacket:    make(chan config.CollectPacket, 1),
+		groupData:          make(map[string]int),
+		collectPacketStore: bucket.NewBucketGroup(200, 100),
 	}
 	clt.lg.SetLogTag("COLLECT")
 	session, err := mgo.Dial(clt.cfg.MongoUrl)
@@ -49,11 +54,12 @@ func ExecCollect(cfg Config) {
 
 // Collect 汇总发布的包数据
 type Collect struct {
-	cfg             Config
-	lg              *alog.ALog
-	session         *mgo.Session
-	chCollectPacket chan config.CollectPacket
-	groupData       map[string]int
+	cfg                Config
+	lg                 *alog.ALog
+	session            *mgo.Session
+	chCollectPacket    chan config.CollectPacket
+	groupData          map[string]int
+	collectPacketStore bucket.BucketGroup
 }
 
 func (c *Collect) DB() *mgo.Database {
@@ -88,26 +94,51 @@ func (c *Collect) Init() error {
 	if err := iter.Close(); err != nil {
 		return fmt.Errorf("初始化组用户数据发生异常：%s", err.Error())
 	}
+	c.collectStore()
 	c.lg.Info("执行数据初始化完成.")
 	return nil
+}
+
+func (c *Collect) collectStore() {
+	collectBucket, err := c.collectPacketStore.Open()
+	if err != nil {
+		c.lg.Errorf("Open collect packet store error:%v", err)
+		return
+	}
+	go func() {
+		db := c.DB()
+		for cBucket := range collectBucket {
+			vals, _ := cBucket.ToSlice()
+			err := db.C(config.CCollect).Insert(vals...)
+			if err != nil {
+				c.lg.Errorf("Store collect packet error:%v", err)
+			}
+		}
+	}()
 }
 
 // StartCollect 开始汇总数据
 func (c *Collect) StartCollect() error {
 	c.lg.Info("开始执行数据汇总...")
-	go c.store()
 	var sendPacket config.SendPacket
-	iter := c.DB().C(config.CPacket).Find(nil).Iter()
+	receiveDB := c.DB()
+	iter := c.DB().C(config.CPacket).Find(nil).Sort("time").Select(bson.M{"_id": 0}).Iter()
 	for iter.Next(&sendPacket) {
 		collectPacket := config.CollectPacket{
 			PacketID:      sendPacket.SendID,
 			PreReceiveNum: int64(c.groupData[sendPacket.ToGroup]),
-			ReceiveNum:    int64(len(sendPacket.Receives)),
 		}
+		var receivePackets []config.ReceivePacket
+		err := receiveDB.C(config.CReceivePacket).Find(bson.M{"sid": sendPacket.SendID}).Select(bson.M{"_id": 0}).All(&receivePackets)
+		if err != nil {
+			c.lg.Errorf("Get receive packet data error:%v", err)
+			continue
+		}
+		collectPacket.ReceiveNum = int64(len(receivePackets))
 		var (
 			maxConsume, minConsume, sumConsume float64
 		)
-		for _, receive := range sendPacket.Receives {
+		for _, receive := range receivePackets {
 			consumeTime := receive.ReceiveTime.Sub(sendPacket.SendTime).Seconds()
 			sumConsume += consumeTime
 			if minConsume == 0 {
@@ -122,28 +153,14 @@ func (c *Collect) StartCollect() error {
 		if collectPacket.ReceiveNum > 0 {
 			collectPacket.AvgConsume = sumConsume / float64(collectPacket.ReceiveNum)
 		}
-		c.chCollectPacket <- collectPacket
+		c.collectPacketStore.Push(collectPacket)
 	}
-	close(c.chCollectPacket)
+	c.collectPacketStore.Close()
 	if err := iter.Close(); err != nil {
 		return err
 	}
 	c.lg.Info("数据存储写入完成.")
 	return nil
-}
-
-func (c *Collect) store() {
-	var collectData []interface{}
-	for packet := range c.chCollectPacket {
-		if len(collectData) == c.cfg.StoreNum {
-			c.insertData(collectData...)
-			collectData = nil
-		}
-		collectData = append(collectData, packet)
-	}
-	if len(collectData) > 0 {
-		c.insertData(collectData...)
-	}
 }
 
 func (c *Collect) insertData(docs ...interface{}) {
@@ -163,7 +180,6 @@ func (c *Collect) Statistics() error {
 		rAvgSumConsume float64
 		lossRate       float64
 		rAvgConsume    float64
-		secReceiveNum  int64
 	)
 	var collectPacket config.CollectPacket
 	iter := c.DB().C(config.CCollect).Find(nil).Iter()
@@ -180,20 +196,15 @@ func (c *Collect) Statistics() error {
 统计结果如下：
 连接数量        %d
 总发包量        %d
-预计总接包量    %d
-实际总接报量    %d
-总丢包率        %.2f%%
-平均总耗时      %.2fs
-平均每秒接包量  %d
+总接包量        %d
+总丢包率        %.3f%%
+接包平均耗时    %.3fs
 	`
 	lossRate = (1 - float64(receiveNum)/float64(preReceiveNum)) * 100
 	if receiveNum > 0 {
 		rAvgConsume = rAvgSumConsume / float64(publishNum)
 	}
-	if rAvgConsume > 0 {
-		secReceiveNum = receiveNum / int64(rAvgConsume)
-	}
-	c.lg.Infof(output, c.clientCount(), publishNum, preReceiveNum, receiveNum, lossRate, rAvgConsume, secReceiveNum)
+	c.lg.Infof(output, c.clientCount(), publishNum, receiveNum, lossRate, rAvgConsume)
 	return nil
 }
 
