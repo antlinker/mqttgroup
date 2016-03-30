@@ -6,7 +6,7 @@ import (
 
 const (
 	Database       = "mqttgroup"
-	CGroup         = "group"
+	CGroup         = "groups"
 	CUser          = "user"
 	CPacket        = "sendpacket"
 	CReceivePacket = "receivepacket"

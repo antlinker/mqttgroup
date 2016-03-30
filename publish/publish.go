@@ -8,9 +8,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/antlinker/go-mqtt/client"
+
 	"github.com/antlinker/alog"
 	"github.com/antlinker/go-bucket"
-	MQTT "github.com/antlinker/mqtt-cli"
+	//MQTT "github.com/antlinker/mqtt-cli"
 	"gopkg.in/mgo.v2"
 
 	"github.com/antlinker/go-cmap"
@@ -75,6 +77,9 @@ type Publish struct {
 	publishPacketTime  time.Time
 	sendPacketStore    bucket.BucketGroup
 	receivePacketStore bucket.BucketGroup
+
+	subscribeNum      int64
+	subscribeTotalNum int64
 }
 
 func (p *Publish) DB() *mgo.Database {
@@ -133,44 +138,58 @@ func (p *Publish) initConnection() error {
 		go func(user config.User) {
 			defer wgroup.Done()
 			clientID := user.UserID
-			opts := MQTT.NewClientOptions()
-			opts.AddBroker(fmt.Sprintf("%s://%s", p.cfg.Network, p.cfg.Address))
-			opts.SetClientID(clientID)
-			opts.SetStore(MQTT.NewMemoryStore())
-			opts.SetProtocolVersion(4)
-			opts.SetAutoReconnect(p.cfg.AutoReconnect)
+			opts := client.MqttOption{
+				Addr:               fmt.Sprintf("%s://%s", p.cfg.Network, p.cfg.Address),
+				Clientid:           clientID,
+				ReconnTimeInterval: 1,
+			}
 			if name, pwd := p.cfg.UserName, p.cfg.Password; name != "" && pwd != "" {
-				opts.SetUsername(name)
-				opts.SetPassword(pwd)
+				opts.UserName = name
+				opts.Password = pwd
 			}
 			if v := p.cfg.KeepAlive; v > 0 {
-				opts.SetKeepAlive(time.Duration(v) * time.Second)
+				opts.KeepAlive = uint16(v)
+				//opts.SetKeepAlive(time.Duration(v) * time.Second)
 			}
 			if v := p.cfg.CleanSession; v {
-				opts.SetCleanSession(v)
+				//opts.SetCleanSession(v)
+				opts.CleanSession = v
 			}
 			clientHandle := NewHandleConnect(clientID, p)
-			opts.SetConnectionLostHandler(func(cli *MQTT.Client, err error) {
-				clientHandle.ErrorHandle(err)
-			})
+			// opts.SetConnectionLostHandler(func(cli *MQTT.Client, err error) {
+			// 	clientHandle.ErrorHandle(err)
+			// })
+			cli, _ := client.CreateClient(opts)
+			cli.AddPacketListener(clientHandle)
+			cli.AddSubListener(clientHandle)
+			cli.AddPubListener(clientHandle)
+			cli.AddDisConnListener(clientHandle)
+			cli.AddRecvPubListener(clientHandle)
 		LB_RECONNECT:
-			cli := MQTT.NewClient(opts)
-			connectToken := cli.Connect()
-			if connectToken.Wait() && connectToken.Error() != nil {
+
+			err := cli.Connect()
+			if err != nil {
+				p.lg.Debug("建立连接失败:", err)
 				time.Sleep(time.Millisecond * 100)
 				goto LB_RECONNECT
 			}
-			subTopics := make(map[string]byte)
+			subfilters := make([]client.SubFilter, len(user.Groups))
+			//subTopics := make(map[string]byte)
 			for j := 0; j < len(user.Groups); j++ {
-				topic := "G/" + user.Groups[j]
-				subTopics[topic] = p.cfg.Qos
+				subfilters[j] = client.CreateSubFilter("G/"+user.Groups[j], client.QoS(p.cfg.Qos))
 			}
-			subToken := cli.SubscribeMultiple(subTopics, func(cli *MQTT.Client, msg MQTT.Message) {
-				clientHandle.Subscribe([]byte(msg.Topic()), msg.Payload())
-			})
-			if subToken.Wait() && subToken.Error() != nil {
-				time.Sleep(time.Millisecond * 100)
+		LB_SUBSCRIBE:
+			atomic.AddInt64(&p.subscribeTotalNum, 1)
+			mp, err := cli.Subscribes(subfilters...)
+			if err != nil {
+				cli.Disconnect()
+				p.lg.Debug("重新连接:", err)
 				goto LB_RECONNECT
+			}
+			mp.Wait()
+			if mp.Err() != nil {
+				p.lg.Debug("重新订阅:", err)
+				goto LB_SUBSCRIBE
 			}
 			p.clients.Set(clientID, cli)
 		}(p.userData[i])
@@ -269,6 +288,8 @@ func (p *Publish) pubAndRecOutput(ticker *time.Ticker) {
 发包耗时                    %.2fs
 执行次数                    %d
 客户端数量                  %d
+订阅数量                    %d
+实际订阅量                  %d
 应发包量                    %d
 实际发包量                  %d
 每秒平均的发包量            %d
@@ -279,7 +300,7 @@ func (p *Publish) pubAndRecOutput(ticker *time.Ticker) {
 每秒最大的接包量            %d`
 
 		p.lgData.Infof(output,
-			totalSecond, packetSecond, p.execNum, clientNum, p.publishTotalNum, p.publishNum, avgPNum, p.maxPublishNum, p.receiveTotalNum, p.receiveNum, avgRNum, p.maxReceiveNum)
+			totalSecond, packetSecond, p.execNum, clientNum, p.subscribeTotalNum, p.subscribeNum, p.publishTotalNum, p.publishNum, avgPNum, p.maxPublishNum, p.receiveTotalNum, p.receiveNum, avgRNum, p.maxReceiveNum)
 	}
 }
 
@@ -326,8 +347,8 @@ func (p *Publish) disconnect() {
 	clientCount := p.clients.Len()
 	disCount := int(float32(clientCount) * (float32(p.cfg.DisconnectScale) / 100))
 	for _, v := range p.clients.ToMap() {
-		vc := v.(*MQTT.Client)
-		vc.Disconnect(100)
+		vc := v.(client.MqttClienter)
+		vc.Disconnect()
 		disCount--
 		if disCount == 0 {
 			break
@@ -355,7 +376,7 @@ func (p *Publish) userPublish(user config.User) {
 	if ucli == nil {
 		return
 	}
-	cli := ucli.(*MQTT.Client)
+	cli := ucli.(client.MqttClienter)
 	for i := 0; i < len(user.Groups); i++ {
 		group := user.Groups[i]
 		cTime := time.Now()
@@ -378,8 +399,8 @@ func (p *Publish) userPublish(user config.User) {
 			continue
 		}
 		topic := "G/" + group
-		cli.Publish(topic, p.cfg.Qos, false, bufData)
-		atomic.AddInt64(&p.publishNum, 1)
+		cli.Publish(topic, client.QoS(p.cfg.Qos), false, bufData)
+
 		if v := p.cfg.UserGroupInterval; v > 0 {
 			time.Sleep(time.Duration(v) * time.Millisecond)
 		}
