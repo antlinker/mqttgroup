@@ -1,5 +1,9 @@
 # MQTT针对群组消息的压力测试
 
+## 差异
+
+* 使用github.com/antlinker/go-map/client 客户端实现
+
 ## 获取
 
 ``` bash
